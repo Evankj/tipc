@@ -63,57 +63,104 @@ type UninitialisedAPIType = APIType<any, any, {
 }>
 
 
-type MiddlewaresObject<ArgumentsType> = {
-  [key: string]: (args: ArgumentsType) => any
+
+
+type APIImplementation<T extends UninitialisedAPIType, Context extends object> = {
+
+  contextInitialiser: (...args: any[]) => Promise<Context>;
+
+  handlers: {
+    [Endpoint in keyof T]: (args: Parameters<T[Endpoint]>[0], ctx: Context) => ReturnType<T[Endpoint]>;
+  };
+
 }
 
-type GenericMiddlewaresObject<ArgumentsType, T extends MiddlewaresObject<ArgumentsType>> = {
-  [Key in keyof T]: ReturnType<T[Key]>
-};
+class TIPC<Context extends object = {}> {
 
+  withContext<Context extends object>() {
+    return new TIPC<Context>();
+  }
 
-type APIImplementation<T extends UninitialisedAPIType> = {
-  [Endpoint in keyof T]: {
-    middlewares: GenericMiddlewaresObject<Parameters<T[Endpoint]>[0], {
-      [key: string]: (args: Parameters<T[Endpoint]>[0]) => any
-    }>,
-    handler: (args: Parameters<T[Endpoint]>[0], context: {
-      // This holds all the returned values from the middlewares
-      middlewares: {
-        [Key in keyof APIImplementation<T>[Endpoint]['middlewares']]:
-        ReturnType<APIImplementation<T>[Endpoint]['middlewares'][Key]>
-      }
-    }) => ReturnType<T[Endpoint]>
+  implement<API extends UninitialisedAPIType>(implementation: APIImplementation<API, Context>) {
+    return implementation;
   }
 }
 
+export const tipc = new TIPC();
 
-export function implementAPI<T extends UninitialisedAPIType>(
-  implementation: APIImplementation<T>
+export function implementAPI<API extends UninitialisedAPIType, Middlewares extends {
+  [Key: string]: () => Promise<any>
+}>(
+  handlers: APIImplementation<API, Middlewares>,
+  middlewares?: Middlewares
 ) {
-  return implementation;
+  return {
+    handlers,
+    middlewares
+  };
 }
 
+// TODO: Generalise this so that it can be reimplemented easily for other transport layers (i.e. not only HTTP) 
+export function createClient<T extends UninitialisedAPIType>(baseUrl: string): T {
 
-export function createClient<T extends UninitialisedAPIType>(
-  endpoints: {
-    [Key in keyof T]: {}
-  }
-): T {
-  let client: Partial<T> = {};
+  const url = new URL(baseUrl);
 
-  for (const endpoint of Object.keys(endpoints)) {
-    // @ts-ignore
-    client[endpoint] = async (
-      args: Parameters<T[typeof endpoint]>[0]
-    ) => {
-      const response = await fetch(`http://localhost:3000/${String(endpoint)}`, {
-        method: 'POST',
-        body: JSON.stringify(args)
-      });
-      return (await response.json()) as ReturnType<T[typeof endpoint]>;
+  const handler = {
+    get(_: any, endpoint: string) {
+      return async (
+        args: Parameters<T[typeof endpoint]>[0]
+      ) => {
+        const response = await fetch(new URL(String(endpoint), url), {
+          method: 'POST',
+          body: JSON.stringify(args)
+        });
+        return (await response.json()) as ReturnType<T[typeof endpoint]>;
+      }
     }
   }
 
-  return client as T
+  const clientProxy = new Proxy<T>({} as T, handler);
+
+  return clientProxy
+}
+
+
+// This is an example showing how we can also send files over HTTP as a 
+// multipart form but keep the same interface and ergonomics
+export function createFormClient<T extends UninitialisedAPIType>(baseUrl: string): T {
+
+  const url = new URL(baseUrl);
+
+  const handler = {
+    get(_: any, endpoint: string) {
+
+
+      return async (
+        args: Parameters<T[typeof endpoint]>[0]
+      ) => {
+
+        const formData = new FormData();
+        Object.entries(args).forEach(([key, val]) => {
+          let value;
+          if (!(val instanceof File)) {
+            value = JSON.stringify(val) as string;
+            formData.append(key, value);
+          } else {
+            value = val as File;
+            formData.append(key, value, value.name);
+          }
+        })
+
+        const response = await fetch(new URL(String(endpoint), url), {
+          method: 'POST',
+          body: formData
+        });
+        return (await response.json()) as ReturnType<T[typeof endpoint]>;
+      }
+    }
+  }
+
+  const clientProxy = new Proxy<T>({} as T, handler);
+
+  return clientProxy
 }

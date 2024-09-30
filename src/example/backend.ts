@@ -1,47 +1,97 @@
 import { Hono } from "hono";
-import { implementAPI } from "..";
+import { tipc } from "..";
 import type { MyAPI } from "./common";
 
-const app = implementAPI<MyAPI>({
+const app = tipc.withContext<{
+  exampleMessage: string,
+  exampleDate: Date,
+  req: Request,
+}>().implement<MyAPI>({
+  handlers: {
+    obj: async ({
+      test
+    }) => {
+      return test.a + test.b;
+    },
 
-  add: async (
-    { args, request }
-  ) => {
-    return args.num1 + args.num2
+    file: async ({
+      input
+    }) => {
+      return await input.text();
+    },
+    add: async ({
+      num1,
+      num2
+    }, {
+      req // We can get things from the context
+    }) => {
+      console.log(req);
+      return num1 + num2;
+    },
+    echo: async ({ message }, { exampleMessage: test }) => {
+      return `${message} ${test}`;
+    }
   },
 
-  multiply: async ({
-    args,
-  }) => {
-    return args.num1 * args.num2
-  },
-
-  echo: async ({
-    args
-  }) => {
-    return args.message
-  },
-
-  default: async (args) => {
-    return 'default'
+  contextInitialiser: async (req: Request) => {
+    return {
+      exampleMessage: "this is a test",
+      exampleDate: new Date(),
+      req
+    }
   }
+
 });
 
 
+// ---- HTTP POST API implementation ----
+// const api = new Hono();
+//
+// for (const endpoint of Object.keys(app.handlers)) {
+//   api.post(endpoint, async (c) => {
+//     const data = await c.req.json();
+//     const path = endpoint as keyof MyAPI;
+//     const context = await app.contextInitialiser(c.req.raw);
+//     const result = await app.handlers[path](data, context);
+//     return c.json(result);
+//   });
+// }
+//
+// api.notFound(async (c) => {
+//   // const result = await app.default({ attemptedEndpoint: c.req.url });
+//   return c.json("NOT FOUND", 404);
+// });
+//
+// export default api;
+
+
+// ---- HTTP POST API multipart form implementation ----
 const api = new Hono();
 
-for (const endpoint of Object.keys(app)) {
+for (const endpoint of Object.keys(app.handlers)) {
   api.post(endpoint, async (c) => {
-    const data = await c.req.json();
+    const data = await c.req.formData();
     const path = endpoint as keyof MyAPI;
-    const result = await app[path]({ args: data, request: c.req.raw });
+    const context = await app.contextInitialiser(c.req.raw);
+    type Key = keyof typeof app.handlers;
+    const endpointKey = endpoint as Key;
+
+    let payload = {} as Parameters<typeof app.handlers[typeof endpointKey]>[0];
+
+    data.forEach((field, key) => {
+      const value = typeof field === "string" ? JSON.parse(field) : field;
+      // @ts-ignore
+      payload[key] = value;
+    })
+
+    // @ts-ignore
+    const result = await app.handlers[path](payload, context);
     return c.json(result);
   });
 }
 
 api.notFound(async (c) => {
-  const result = await app.default({ attemptedEndpoint: c.req.url });
-  return c.json("DEFAULT", 404);
+  return c.json("NOT FOUND", 404);
 });
 
 export default api;
