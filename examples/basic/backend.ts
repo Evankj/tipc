@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { tipc } from "..";
+import { tipc } from "../../src";
 import type { MyAPI } from "./common";
 
 const app = tipc.withContext<{

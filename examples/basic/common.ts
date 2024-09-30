@@ -1,4 +1,4 @@
-import type { APIDefinition, JSONSerializableType } from ".."
+import type { APIDefinition, JSONSerializableType } from "../../src"
 
 export type MyAPI = APIDefinition<JSONSerializableType | File | {
   [key: string]: JSONSerializableType | File

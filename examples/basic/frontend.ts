@@ -1,4 +1,4 @@
-import { createClient, createFormClient } from "..";
+import { createFormClient } from "../../src";
 import type { MyAPI } from "./common";
 
 const client = createFormClient<MyAPI>("http://localhost:3000/");
